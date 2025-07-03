@@ -169,10 +169,15 @@ class Belay:
     def sensor_callback(self, eventtime, state):
         self.last_state = state
         if self.enabled:
-            self.timeout = self.reactor.monotonic() + 20
-            self.gcode.respond_info(
-                "Belay Pressure changed, increasing stuck timeout"
+            virtual_sdcard = self.printer.lookup_object("virtual_sdcard")
+            file_pos = virtual_sdcard.get_status(eventtime).get(
+                "file_position"
             )
+            if file_pos > 1:
+                self.timeout = self.reactor.monotonic() + 20
+                self.gcode.respond_info(
+                    "Belay Pressure changed, increasing stuck timeout"
+                )
             self.update_multiplier()
 
     def update_multiplier(self, print_msg=True):
@@ -209,9 +214,6 @@ class Belay:
         prev_direction = self.last_direction
         self.last_direction = curr_pos >= past_pos
         if self.last_direction != prev_direction:
-            self.gcode.respond_info(
-                "last direction is not the same as prev direction so updating multiplier"
-            )
             if self.debug_level >= 2:
                 self.gcode.respond_info(
                     "New Belay sensor direction: %s" % self.last_direction
@@ -223,12 +225,13 @@ class Belay:
 
     def handle_printing(self, eventtime) -> None:
         self.timeout = self.reactor.monotonic() + self.stuck_timeout
-        self.gcode.respond_info("ON handle printing, state changed")
         self.reactor.update_timer(self.update_stuck_timer, self.reactor.NOW)
 
     def update_verify_stuck(self, eventtime) -> float:
         idle_timeout = self.printer.lookup_object("idle_timeout")
         state = idle_timeout.get_status(eventtime).get("state")
+        virtual_sdcard = self.printer.lookup_object("virtual_sdcard")
+        
         if state.lower() == "printing":
             self.gcode.respond_info(
                 f"Belay stuck with timeout {self.timeout} timer: {self.reactor.monotonic()}"
@@ -238,7 +241,7 @@ class Belay:
                 return self.reactor.monotonic() + 1.0
 
             self.gcode.respond_info("Belay reports filament Stuck.")
-            self.gcode.run_script_from_command("PAUSE\nM400")
+            self.gcode.run_script_from_command("PAUSE")
             return self.reactor.NEVER
         else:
             self.curr_stuck_timer = 0
